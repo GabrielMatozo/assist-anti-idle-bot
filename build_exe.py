@@ -63,39 +63,23 @@ def check_resources():
         print_warning("Pasta 'resources' não encontrada. Criando...")
         resources_dir.mkdir(exist_ok=True)
 
-    # Verificar ícone
     icon_path = resources_dir / "app_icon.ico"
-    if not icon_path.exists():
-        print_warning(
-            "Ícone não encontrado. Verificando se o script de download está disponível..."
-        )
-        download_script = Path("download_icons.py")
-        if download_script.exists():
-            print_info("Executando script de download de ícones...")
-            subprocess.run([sys.executable, str(download_script)], check=False)
-            if icon_path.exists():
-                print_info("Ícones baixados com sucesso!")
-            else:
-                print_warning("Não foi possível baixar os ícones automaticamente.")
-        else:
-            print_warning("Script de download de ícones não encontrado.")
-    else:
+    if icon_path.exists():
         print_info(f"Ícone encontrado: {icon_path}")
+    else:
+        print_warning(f"Ícone não encontrado: {icon_path}")
 
-    return icon_path, None
+    return icon_path
 
 
 def install_dependencies():
     # Instala as dependências necessárias para rodar e empacotar o projeto
     print_step("Instalando dependências necessárias...")
 
-    # Criar arquivo requirements.txt com versões compatíveis com Python 3.13
-    with open("requirements.txt", "w") as f:
-        f.write("pyautogui\n")
-        f.write("pillow\n")
-        f.write("pyinstaller\n")
+    if not os.path.exists("requirements.txt"):
+        print_error("requirements.txt não encontrado!")
+        return None
 
-    # Instalar dependências
     run_command(
         [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], check=False
     )
@@ -118,44 +102,27 @@ def install_dependencies():
 
 
 def check_pyarmor():
-    # Verifica se o PyArmor está instalado, oferece para instalar se não estiver
     print_step("Verificando disponibilidade do PyArmor...")
 
     result = run_command([sys.executable, "-m", "pip", "show", "pyarmor"], check=False)
 
     if result and result.returncode == 0:
         print_info("PyArmor encontrado. Pode ser usado para ofuscação.")
-        return True
     else:
-        print_warning("PyArmor não encontrado. Ofuscação não será aplicada.")
-        install_pyarmor = input("Deseja instalar o PyArmor agora? (s/n): ").lower()
-        if install_pyarmor == "s":
-            print_info("Instalando PyArmor...")
-            result = run_command(
-                [sys.executable, "-m", "pip", "install", "pyarmor"], check=False
-            )
-            if result and result.returncode == 0:
-                print_info("PyArmor instalado com sucesso!")
-                return True
-            else:
-                print_warning(
-                    "Não foi possível instalar o PyArmor. Continuando sem ofuscação."
-                )
-        return False
+        print_warning("PyArmor não encontrado. Continuando sem ofuscação.")
 
 
-def build_executable(icon_path, cleanup_path, use_pyarmor=False):
-    # Gera o executável .exe usando PyInstaller, limpando builds antigos para garantir atualização do ícone
+def build_executable(icon_path):
     print_step("Criando executável com PyInstaller...")
 
     # Nome do arquivo principal
-    main_script = "assistente_produtividade.py"
+    main_script = "src/main.py"
     if not os.path.exists(main_script):
         print_error(f"Arquivo principal {main_script} não encontrado!")
         return False
 
     # Nome do executável de saída
-    output_name = "AssistenteProducao"
+    output_name = "AssistenteAntiIdle"
 
     # Limpar dist/build antes do build para garantir que o ícone seja atualizado
     for pasta in ["dist", "build"]:
@@ -168,7 +135,9 @@ def build_executable(icon_path, cleanup_path, use_pyarmor=False):
             except Exception as e:
                 print_warning(f"Não foi possível remover a pasta '{pasta}': {e}")
 
-    # Preparar comando PyInstaller
+    # Separador de path para --add-data: ; no Windows, : no Linux/Mac
+    sep = ";" if os.name == "nt" else ":"
+
     pyinstaller_cmd = [
         sys.executable,
         "-m",
@@ -176,16 +145,19 @@ def build_executable(icon_path, cleanup_path, use_pyarmor=False):
         "--name",
         output_name,
         "--onefile",
-        "--windowed",
         "--clean",
         f"--icon={icon_path}",
         "--add-data",
-        "resources;resources",
+        f"resources{sep}resources",
+        "--add-data",
+        f"src{sep}src",
         main_script,
     ]
+    if os.name == "nt":
+        pyinstaller_cmd.insert(7, "--windowed")
 
     print_info(
-        "Executando comando PyInstaller para gerar o .exe com ícone personalizado..."
+        "Executando PyInstaller..."
     )
     print_info("Comando gerado:")
     print_info(" ".join(str(arg) for arg in pyinstaller_cmd))
@@ -195,12 +167,10 @@ def build_executable(icon_path, cleanup_path, use_pyarmor=False):
     if result and result.returncode == 0:
         dist_dir = os.path.join("dist")
         if os.path.exists(dist_dir):
-            exe_path = os.path.join(dist_dir, f"{output_name}.exe")
+            ext = ".exe" if os.name == "nt" else ""
+            exe_path = os.path.join(dist_dir, f"{output_name}{ext}")
             if os.path.exists(exe_path):
                 print_info(f"Executável criado com sucesso: {exe_path}")
-                print_info(
-                    "Se o ícone do .exe não aparecer, pressione F5 no Explorer ou reinicie o Explorer."
-                )
                 return True
 
     print_error("Falha ao criar o executável com PyInstaller.")
@@ -208,7 +178,7 @@ def build_executable(icon_path, cleanup_path, use_pyarmor=False):
 
 
 def main():
-    print_header("CONSTRUÇÃO DO ASSISTENTE DE PRODUTIVIDADE")
+    print_header("CONSTRUÇÃO DO ASSISTENTE ANTI-IDLE")
 
     # Mostra a versão do Python em uso
     python_version = get_python_version()
@@ -216,25 +186,20 @@ def main():
     if python_version.startswith("3.13"):
         print_info("Python 3.13 detectado - pode dar ruim em alguns pacotes.")
 
-    # Verifica se os recursos necessários estão presentes
-    icon_path, cleanup_path = check_resources()
-
-    # Instala as dependências do projeto
+    icon_path = check_resources()
     pyinstaller_version = install_dependencies()
     if not pyinstaller_version:
         print_error("Não foi possível instalar as dependências necessárias.")
         return False
 
-    # PyArmor é opcional, só instala se desejar ofuscação
-    use_pyarmor = check_pyarmor()
-
-    # Gera o executável final
-    success = build_executable(icon_path, cleanup_path, use_pyarmor)
+    check_pyarmor()
+    success = build_executable(icon_path)
 
     if success:
         print_header("PROCESSO CONCLUÍDO COM SUCESSO")
         print_info("O executável foi criado e tá pronto pra usar.")
-        print_info("Localização: dist/AssistenteProducao.exe")
+        ext = ".exe" if os.name == "nt" else ""
+        print_info(f"Localização: dist/AssistenteAntiIdle{ext}")
     else:
         print_header("PROCESSO CONCLUÍDO COM ERROS")
         print_warning("Revise os erros acima e tenta de novo.")
@@ -250,6 +215,5 @@ if __name__ == "__main__":
     except Exception as e:
         print_error(f"Erro inesperado: {e}")
 
-    # Mantém a janela do CMD aberta após execução para leitura das mensagens
-    if not sys.stdout.isatty():
+    if os.name == "nt" and not sys.stdout.isatty():
         input("\nPressione ENTER para sair...")

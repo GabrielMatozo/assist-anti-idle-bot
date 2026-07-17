@@ -1,3 +1,4 @@
 pyautogui
 pillow
+customtkinter>=5.2.0
 pyinstaller
